@@ -2138,38 +2138,44 @@ function _findz(A::AbstractSparseMatrixCSC{Tv,Ti}, rows=1:size(A, 1), cols=1:siz
     return CartesianIndex(0, 0)
 end
 
-function _findr(op, A, region, Tv)
+function _findr(f, op, A, region, Tv)
     require_one_based_indexing(A)
     Ti = eltype(keys(A))
     i1 = first(keys(A))
     N = nnz(A)
     L = widelength(A)
+    To = promote_type(Tv, Base.promote_op(f, Tv))
     if L == 0
         if prod(map(length, Base.reduced_indices(A, region))) != 0
             throw(ArgumentError("array slices must be non-empty"))
         else
             ri = Base.reduced_indices0(A, region)
-            return (zeros(Tv, ri), zeros(Ti, ri))
+            return (zeros(To, ri), zeros(Ti, ri))
         end
     end
 
     colptr = getcolptr(A); rowval = rowvals(A); nzval = nonzeros(A); m = size(A, 1); n = size(A, 2)
-    zval = zero(Tv)
+    zval = f(zero(Tv))
     szA = size(A)
 
     if region == 1 || region == (1,)
         (N == 0) && (return (fill(zval,1,n), fill(i1,1,n)))
-        S = Vector{Tv}(undef, n); I = Vector{Ti}(undef, n)
+        S = Vector{To}(undef, n); I = Vector{Ti}(undef, n)
         @inbounds for i = 1 : n
             Sc = zval; Ic = _findz(A, 1:m, i:i)
             if Ic == CartesianIndex(0, 0)
                 j = colptr[i]
                 Ic = CartesianIndex(rowval[j], i)
-                Sc = nzval[j]
+                Sc = f(nzval[j])
             end
             for j = colptr[i] : colptr[i+1]-1
-                if op(nzval[j], Sc)
-                    Sc = nzval[j]
+                # fval = f(nzval[j])
+                # if op(fval, Sc)#op(nzval[j], Sc)
+                #     Sc = fval#nzval[j]
+                #     Ic = CartesianIndex(rowval[j], i)
+                # end
+                if op(f(nzval[j]), Sc)
+                    Sc = f(nzval[j])
                     Ic = CartesianIndex(rowval[j], i)
                 end
             end
@@ -2178,19 +2184,24 @@ function _findr(op, A, region, Tv)
         return(reshape(S,1,n), reshape(I,1,n))
     elseif region == 2 || region == (2,)
         (N == 0) && (return (fill(zval,m,1), fill(i1,m,1)))
-        S = Vector{Tv}(undef, m)
+        S = Vector{To}(undef, m)
         I = Vector{Ti}(undef, m)
         @inbounds for row in 1:m
             S[row] = zval; I[row] = _findz(A, row:row, 1:n)
             if I[row] == CartesianIndex(0, 0)
                 I[row] = CartesianIndex(row, 1)
-                S[row] = A[row,1]
+                S[row] = f(A[row,1])
             end
         end
         @inbounds for i = 1 : n, j = colptr[i] : colptr[i+1]-1
             row = rowval[j]
-            if op(nzval[j], S[row])
-                S[row] = nzval[j]
+            # fval = f(nzval[j])
+            # if op(fval, S[row])#op(nzval[j], S[row])
+            #     S[row] = fval#nzval[j]
+            #     I[row] = CartesianIndex(row, i)
+            # end
+            if op(f(nzval[j]), S[row])
+                S[row] = f(nzval[j])
                 I[row] = CartesianIndex(row, i)
             end
         end
@@ -2198,11 +2209,16 @@ function _findr(op, A, region, Tv)
     elseif region == (1,2)
         (N == 0) && (return (fill(zval,1,1), fill(i1,1,1)))
         hasz = nnz(A) != widelength(A)
-        Sv = hasz ? zval : nzval[1]
+        Sv = hasz ? zval : f(nzval[1])
         Iv::(Ti) = hasz ? _findz(A) : i1
         @inbounds for i = 1 : size(A, 2), j = colptr[i] : (colptr[i+1]-1)
-            if op(nzval[j], Sv)
-                Sv = nzval[j]
+            # fval = f(nzval[j])
+            # if op(fval, Sv)#op(nzval[j], Sv)
+            #     Sv = fval#nzval[j]
+            #     Iv = CartesianIndex(rowval[j], i)
+            # end
+            if op(f(nzval[j]), Sv)
+                Sv = f(nzval[j])
                 Iv = CartesianIndex(rowval[j], i)
             end
         end
@@ -2216,11 +2232,11 @@ _isless_fm(a, b)    =  b == b && ( a != a || isless(a, b) )
 _isgreater_fm(a, b) =  b == b && ( a != a || isless(b, a) )
 
 findmin(A::AbstractSparseMatrixCSC{Tv}, region::Union{Integer,Tuple{Integer},NTuple{2,Integer}}) where {Tv} =
-    _findr(_isless_fm, A, region, Tv)
+    _findr(identity, _isless_fm, A, region, Tv)
 findmax(A::AbstractSparseMatrixCSC{Tv}, region::Union{Integer,Tuple{Integer},NTuple{2,Integer}}) where {Tv} =
-    _findr(_isgreater_fm, A, region, Tv)
-findmin(A::AbstractSparseMatrixCSC) = (r=findmin(A,(1,2)); (r[1][1], r[2][1]))
-findmax(A::AbstractSparseMatrixCSC) = (r=findmax(A,(1,2)); (r[1][1], r[2][1]))
+    _findr(identity, _isgreater_fm, A, region, Tv)
+findmin(A::AbstractSparseMatrixCSC) = (r=findmin2(A,(1,2)); (r[1][1], r[2][1]))
+findmax(A::AbstractSparseMatrixCSC) = (r=findmax2(A,(1,2)); (r[1][1], r[2][1]))
 
 argmin(A::AbstractSparseMatrixCSC) = findmin(A)[2]
 argmax(A::AbstractSparseMatrixCSC) = findmax(A)[2]
